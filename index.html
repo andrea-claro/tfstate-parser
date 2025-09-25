@@ -1,0 +1,490 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>TFState Explorer</title>
+    <style>
+        :root{
+          --bg:#0f172a; /* slate-900 */
+          --panel:#111827; /* gray-900 */
+          --muted:#1f2937; /* gray-800 */
+          --text:#e5e7eb; /* gray-200 */
+          --dim:#9ca3af; /* gray-400 */
+          --accent:#22d3ee; /* cyan-400 */
+          --accent2:#a78bfa; /* violet-400 */
+          --ok:#34d399; /* green-400 */
+          --warn:#f59e0b; /* amber-500 */
+          --danger:#f87171; /* red-400 */
+        }
+        html,body{height:100%}
+        body{margin:0;background:var(--bg);color:var(--text);font:14px/1.4 system-ui,Segoe UI,Roboto,Ubuntu,"Helvetica Neue",Arial}
+        .app{display:grid;grid-template-rows:auto auto 1fr;gap:10px;height:100%}
+        header{display:flex;gap:12px;align-items:center;padding:10px 12px;border-bottom:1px solid var(--muted);background:linear-gradient(180deg,rgba(255,255,255,.02),rgba(255,255,255,0))}
+        header h1{font-size:16px;margin:0 8px 0 0;letter-spacing:.3px}
+        header .pill{border:1px solid var(--muted);border-radius:999px;padding:4px 10px;color:var(--dim)}
+
+        .toolbar{display:flex;gap:10px;align-items:center;padding:8px 12px;background:var(--panel);border-top:1px solid #0003;border-bottom:1px solid #0003;flex-wrap:wrap}
+        .toolbar input[type="text"], .toolbar select{background:#0b1220;border:1px solid #22324a;color:var(--text);padding:8px;border-radius:8px}
+        .toolbar input[type="text"]{width:320px}
+        .toolbar .btn{background:#0b1220;border:1px solid #22324a;color:var(--text);padding:8px 10px;border-radius:8px;cursor:pointer}
+        .toolbar .btn:hover{border-color:#2e425f}
+
+        .layout{display:grid;grid-template-columns:320px 1fr 460px;gap:10px;padding:10px;height:calc(100% - 110px);box-sizing:border-box}
+        .panel{background:var(--panel);border:1px solid #0006;border-radius:12px;display:flex;flex-direction:column;min-height:0}
+        .panel h2{font-size:13px;margin:0;padding:10px 12px;border-bottom:1px solid #0006;color:var(--dim);text-transform:uppercase;letter-spacing:.6px}
+        .panel .content{padding:8px 10px;overflow:auto}
+
+        /* Tree */
+        .tree{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;font-size:12px}
+        .tree .node{display:block}
+        .tree details{padding:2px 0}
+        .tree summary{cursor:pointer;list-style:none}
+        .tree summary::-webkit-details-marker{display:none}
+        .tree .label{display:flex;align-items:center;gap:6px}
+        .twist{display:inline-block;width:10px}
+        .k{color:#93c5fd}
+        .v{color:#86efac}
+        .dim{color:var(--dim)}
+
+        /* Table */
+        table{border-collapse:collapse;width:100%}
+        th,td{padding:8px;border-bottom:1px solid #0004;text-align:left;font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;font-size:12px}
+        th{position:sticky;top:0;background:#0b1220;border-bottom:1px solid #22324a}
+        tr:hover{background:#0b1220}
+
+        /* JSON viewer */
+        .json{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;white-space:pre}
+        .muted{color:var(--dim)}
+
+        /* Footer actions */
+        .actions{display:flex;gap:8px;flex-wrap:wrap}
+        .actions .btn{background:#0b1220;border:1px solid #22324a;color:var(--text);padding:8px 10px;border-radius:8px;cursor:pointer}
+        .actions .btn[disabled]{opacity:.5;cursor:not-allowed}
+        textarea{width:100%;min-height:120px;background:#0b1220;color:var(--text);border:1px solid #22324a;border-radius:8px;padding:8px;resize:vertical}
+
+        .filedrop{border:1px dashed #2e425f;border-radius:10px;padding:12px;text-align:center;color:var(--dim)}
+        .filedrop.drag{background:#0b1220}
+
+        .badge{display:inline-block;background:#0b1220;border:1px solid #22324a;border-radius:999px;padding:2px 6px;font-size:11px;color:var(--dim)}
+
+        /* Diff highlights */
+        .highlight-add{background:rgba(16,185,129,.15)}
+        .highlight-rem{background:rgba(244,63,94,.15)}
+        .highlight-chg{background:rgba(245,158,11,.15)}
+    </style>
+</head>
+<body>
+<div class="app">
+    <header>
+        <h1>TFState Explorer</h1>
+        <div class="pill">Visualizza • Cerca • Diff • Genera move/moved/import</div>
+        <span id="meta" class="pill"></span>
+    </header>
+
+    <div class="toolbar">
+        <input id="search" type="text" placeholder="Cerca (path, tipo, nome, attributi)…" />
+        <label class="badge"><input id="attrSearch" type="checkbox" checked> include attributi</label>
+
+        <label>Modulo <select id="fMod"></select></label>
+        <label>Tipo <select id="fType"></select></label>
+        <label>Provider <select id="fProv"></select></label>
+        <label>Diff <select id="fDiff">
+            <option value="all">(tutti)</option>
+            <option value="added">added</option>
+            <option value="removed">removed</option>
+            <option value="changed">changed</option>
+            <option value="same">same</option>
+        </select></label>
+
+        <button class="btn" id="selectFiltered">Seleziona risultati</button>
+        <button class="btn" id="clearSel">Pulisci selezione</button>
+        <div style="flex:1"></div>
+        <input type="file" id="file" accept="application/json,.json,.tfstate" class="btn" />
+        <input type="file" id="fileBase" accept="application/json,.json,.tfstate" class="btn" title="Carica base (diff)" />
+        <button class="btn" id="demo">Carica demo</button>
+    </div>
+
+    <div class="layout">
+        <section class="panel">
+            <h2>Albero moduli & risorse</h2>
+            <div class="content">
+                <div id="tree" class="tree"></div>
+            </div>
+        </section>
+
+        <section class="panel">
+            <h2>Risorse (filtrabili)</h2>
+            <div class="content">
+                <table id="tbl">
+                    <thead>
+                    <tr>
+                        <th style="width:28px"><input type="checkbox" id="toggleAll"></th>
+                        <th>Path</th>
+                        <th>Tipo</th>
+                        <th>Nome</th>
+                        <th>Chiave/Index</th>
+                        <th>Provider</th>
+                        <th>Diff</th>
+                    </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+        </section>
+
+        <section class="panel">
+            <h2>Dettagli, rename preview & generatori</h2>
+            <div class="content" style="display:flex;flex-direction:column;gap:10px">
+                <div>
+                    <div class="badge">Dettagli selezione</div>
+                    <pre id="detail" class="json muted">Carica un .tfstate e seleziona una riga.</pre>
+                </div>
+
+                <div class="actions">
+                    <input id="oldBase" type="text" placeholder="Vecchio prefisso (es: module.A.module.B.module.C)" style="flex:1;background:#0b1220;border:1px solid #22324a;color:var(--text);padding:8px;border-radius:8px">
+                    <input id="newBase" type="text" placeholder="Nuovo prefisso (es: module.A.module.D)" style="flex:1;background:#0b1220;border:1px solid #22324a;color:var(--text);padding:8px;border-radius:8px">
+                    <!-- nuovo: campo per scegliere l'attributo ID da usare negli import -->
+                    <input id="idField" type="text" placeholder="Campo ID per import (es: id, ocid) — vuoto = auto" style="flex:1;background:#0b1220;border:1px solid #22324a;color:var(--text);padding:8px;border-radius:8px">
+                </div>
+
+                <div class="content" style="max-height:160px;overflow:auto;border:1px solid #0006;border-radius:8px">
+                    <table class="table" id="preview">
+                        <thead><tr><th>from</th><th>to</th><th>note</th></tr></thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+
+                <div class="actions">
+                    <button class="btn" id="genMv">Genera "terraform state mv"</button>
+                    <button class="btn" id="genMoved">Genera blocchi "moved"</button>
+                    <!-- nuovi: import CLI e blocchi HCL -->
+                    <button class="btn" id="genImportCLI">Genera "terraform import"</button>
+                    <button class="btn" id="genImportBlocks">Genera blocchi "import"</button>
+
+                    <button class="btn" id="exportCsv">Esporta CSV</button>
+                    <div style="flex:1"></div>
+                    <button class="btn" id="copyOut">Copia</button>
+                    <button class="btn" id="dlOut">Download</button>
+                </div>
+
+                <textarea id="out" placeholder="Output comandi / blocchi…"></textarea>
+            </div>
+        </section>
+    </div>
+</div>
+
+<script>
+    // --- Small helpers ---
+    const $ = sel => document.querySelector(sel);
+    const $$ = sel => Array.from(document.querySelectorAll(sel));
+    const fmt = x => JSON.stringify(x, null, 2);
+
+    let RAW = null;          // raw tfstate
+    let BASE = null;         // base tfstate per diff
+    let ROWS = [];           // normalized rows for table
+    let FILTERED = [];       // filtered rows
+    let SELECTED = new Set();// selected ids
+    let DIFFS = null;        // {items, rowIndex}
+
+    function parseTfState(json){
+      const resources = json?.resources || [];
+      const rows = [];
+      for (const res of resources){
+        const module = res.module || ""; // e.g. module.A.module.B
+        const type = res.type;            // e.g. oci_core_instance
+        const name = res.name;
+        const provider = res.provider || "";
+        const instances = res.instances || [];
+        instances.forEach((inst, idx) => {
+          const key = ("index_key" in inst && inst.index_key!==null && inst.index_key!==undefined)
+            ? inst.index_key
+            : (inst.index!==undefined ? inst.index : idx);
+          // Build address with key when present
+          const base = (module? module+".":"") + `${type}.${name}`;
+          const addr = (key===undefined || key===null) ? base : (typeof key === 'string' ? `${base}["${key}"]` : `${base}[${key}]`);
+          rows.push({ id: `${addr}`, module, type, name, provider, key, addr, attributes: inst.attributes || {}, rawInstance: inst, rawResource: res });
+        });
+      }
+      return rows;
+    }
+
+    function buildTree(rows){
+      const root = {};
+      for(const r of rows){
+        const modPath = r.module? r.module.split('.') : [];
+        let node = root;
+        for(const seg of modPath){ if(!seg) continue; node.children = node.children||{}; node.children[seg] = node.children[seg]||{}; node = node.children[seg]; }
+        const resKey = `${r.type}.${r.name}`;
+        node.resources = node.resources||{}; (node.resources[resKey] = node.resources[resKey]||[]).push(r);
+      }
+      return root;
+    }
+
+    function renderTree(tree){
+      const c = $('#tree'); c.innerHTML = '';
+      function el(tag, attrs={}, children=[]) { const e = document.createElement(tag); for(const k in attrs){ if(k==='text') e.textContent=attrs[k]; else e.setAttribute(k, attrs[k]); } children.forEach(ch => e.appendChild(ch)); return e; }
+
+      function renderNode(name, node){
+        const details = el('details', { open: true });
+        const summary = el('summary');
+        const label = el('span', { class: 'label' });
+        const twist = el('span', { class:'twist' }, [document.createTextNode('▾')]);
+        summary.appendChild(label); details.appendChild(summary);
+        summary.addEventListener('click', () => { twist.textContent = details.open ? '▾' : '▸'; });
+
+        const title = el('span'); title.innerHTML = `<span class="k">${name||'root'}</span>`;
+        label.append(twist, title);
+
+        const container = el('div', {style:'padding-left:12px'}); details.appendChild(container);
+
+        if(node.children){ for(const [childName, childNode] of Object.entries(node.children).sort()) container.appendChild(renderNode(childName, childNode)); }
+        if(node.resources){
+          for(const [resName, list] of Object.entries(node.resources).sort()){
+            const dd = el('details');
+            const sm = el('summary'); sm.innerHTML = `<span class="label"><span class="twist">▸</span> <span class="v">${resName}</span> <span class="dim">(${list.length})</span></span>`; dd.appendChild(sm);
+            const inner = el('div',{style:'padding-left:12px'});
+            list.forEach(r => {
+              const row = el('label', { class:'node' });
+              row.innerHTML = `<input type="checkbox" data-id="${r.id}"> <span class="dim">${r.key!==undefined? '['+JSON.stringify(r.key)+']':''}</span> <code>${r.addr}</code>`;
+              inner.appendChild(row);
+            });
+            dd.appendChild(inner); container.appendChild(dd);
+          }
+        }
+        return details;
+      }
+      c.appendChild(renderNode('module.root', tree));
+
+      // Wire selection checkboxes in tree
+      c.addEventListener('change', (e)=>{
+        if(e.target.matches('input[type=checkbox][data-id]')){
+          const id = e.target.getAttribute('data-id');
+          if(e.target.checked) SELECTED.add(id); else SELECTED.delete(id);
+          syncSelectionUI(); renderPreview();
+        }
+      });
+    }
+
+    function computeDiff(currentRows, baseRows){
+      const rowIndex = new Map(currentRows.map(r => [r.addr, r]));
+      const baseIndex = new Map(baseRows.map(r => [r.addr, r]));
+      const setAll = new Set([...currentRows.map(r=>r.addr), ...baseRows.map(r=>r.addr)]);
+      const items = [];
+      function h(a){ try{return JSON.stringify(a);}catch{return '';} }
+      for(const addr of setAll){
+        const a = rowIndex.get(addr), b = baseIndex.get(addr);
+        if(a && !b) items.push({ addr, kind:'added', row:a });
+        else if(!a && b) items.push({ addr, kind:'removed', row:b });
+        else if(a && b){ items.push({ addr, kind: h(a.attributes)===h(b.attributes) ? 'same' : 'changed', row:a }); }
+      }
+      return { items, rowIndex };
+    }
+
+    function renderTable(rows){
+      const tbody = $('#tbl tbody'); tbody.innerHTML = '';
+      const frag = document.createDocumentFragment();
+      rows.forEach(r => {
+        const tr = document.createElement('tr');
+        const diffK = DIFFS?.items.find(d => d.addr===r.addr)?.kind;
+        if(diffK==='added') tr.classList.add('highlight-add');
+        if(diffK==='removed') tr.classList.add('highlight-rem');
+        if(diffK==='changed') tr.classList.add('highlight-chg');
+        tr.innerHTML = `
+          <td><input type="checkbox" class="rowSel" data-id="${r.id}" ${SELECTED.has(r.id)?'checked':''}></td>
+          <td><code>${r.addr}</code></td>
+          <td>${r.type}</td>
+          <td>${r.name}</td>
+          <td>${r.key!==undefined? JSON.stringify(r.key):''}</td>
+          <td><span class="dim">${r.provider||''}</span></td>
+          <td class="dim">${diffK||''}</td>`;
+        tr.addEventListener('click', (evt) => { if(evt.target.matches('input')) return; $('#detail').textContent = fmt(r.rawInstance); });
+        frag.appendChild(tr);
+      });
+      tbody.appendChild(frag);
+      $('#meta').textContent = `${rows.length} istanze`;
+
+      // selection handlers
+      $$('#tbl .rowSel').forEach(cb => cb.addEventListener('change', e => {
+        const id = e.target.getAttribute('data-id');
+        if(e.target.checked) SELECTED.add(id); else SELECTED.delete(id);
+        syncSelectionUI(); renderPreview();
+      }));
+    }
+
+    function syncSelectionUI(){
+      // Mirror selection into tree checkboxes
+      $$('#tree input[type=checkbox][data-id]').forEach(cb => { const id = cb.getAttribute('data-id'); cb.checked = SELECTED.has(id); });
+      // ToggleAll
+      $('#toggleAll').checked = FILTERED.length>0 && FILTERED.every(r => SELECTED.has(r.id));
+    }
+
+    function fillSelect(sel, values){
+      const opts = [''].concat(Array.from(new Set(values)).filter(Boolean).sort());
+      sel.innerHTML = '';
+      opts.forEach(v => { const o = document.createElement('option'); o.value = v; o.textContent = v || '(tutti)'; sel.appendChild(o); });
+    }
+
+    function applyFilter(){
+      let list = ROWS.slice();
+      const mf = $('#fMod').value, tf = $('#fType').value, pf = $('#fProv').value, df = $('#fDiff').value;
+      if(mf) list = list.filter(r => (r.module||'').startsWith(mf));
+      if(tf) list = list.filter(r => r.type===tf);
+      if(pf) list = list.filter(r => r.provider===pf);
+      if(df && df!=='all' && DIFFS) list = list.filter(r => DIFFS.items.find(d => d.addr===r.addr && d.kind===df));
+
+      const q = $('#search').value.trim().toLowerCase();
+      const inAttrs = $('#attrSearch').checked;
+      if(q){
+        const words = q.split(/\s+/).filter(Boolean);
+        list = list.filter(r => {
+          const hay = [r.addr, r.type, r.name, String(r.key||'')].join(' ').toLowerCase();
+          let ok = words.every(w => hay.includes(w));
+          if(!ok || !inAttrs) return ok;
+          try{ const blob = JSON.stringify(r.attributes).toLowerCase(); return words.every(w => hay.includes(w) || blob.includes(w)); }catch{ return ok; }
+        });
+      }
+      FILTERED = list; renderTable(FILTERED); syncSelectionUI(); renderPreview();
+    }
+
+    function loadState(obj){
+      RAW = obj; ROWS = parseTfState(RAW); FILTERED = ROWS.slice(); SELECTED.clear();
+      renderTree(buildTree(ROWS));
+      renderTable(FILTERED);
+      fillSelect($('#fMod'), ROWS.map(r=>r.module));
+      fillSelect($('#fType'), ROWS.map(r=>r.type));
+      fillSelect($('#fProv'), ROWS.map(r=>r.provider));
+      $('#detail').textContent = 'Seleziona una riga per vedere i dettagli dell\'istanza.';
+      if(BASE){ DIFFS = computeDiff(ROWS, parseTfState(BASE)); }
+      applyFilter();
+    }
+    function loadBase(obj){ BASE = obj; DIFFS = computeDiff(ROWS, parseTfState(BASE)); applyFilter(); }
+
+    // Generators & preview
+    function selectedRows(){ return ROWS.filter(r => SELECTED.has(r.id)); }
+    function guessOldBase(rows){ const counts = new Map(); rows.forEach(r => { const m = r.module||''; counts.set(m, (counts.get(m)||0)+1); }); let best=''; let n=0; counts.forEach((v,k)=>{ if(v>n){n=v;best=k;}}); return best; }
+    function normalizeBase(s){ return (s||'').replace(/\.$/, ''); }
+
+    function renderPreview(){
+      const tbody = $('#preview tbody'); tbody.innerHTML = '';
+      const rows = selectedRows().length? selectedRows() : FILTERED;
+      if(rows.length===0) return;
+      const ob = normalizeBase($('#oldBase').value || guessOldBase(rows));
+      const nb = normalizeBase($('#newBase').value || ob);
+      const rowIndex = new Map(ROWS.map(r => [r.addr, r]));
+      const counts = new Map();
+      const items = rows.map(r => { const from=(ob? ob+'.':'')+r.addr; const to=(nb? nb+'.':'')+r.addr; const exists=!!rowIndex.get(to); const okPrefix = from.startsWith(ob? ob+'.':'') || ob===''; counts.set(to,(counts.get(to)||0)+1); return {from,to,exists,okPrefix}; });
+      items.forEach(x => x.dup = (counts.get(x.to)||0) > 1);
+      const frag = document.createDocumentFragment();
+      for(const x of items){ const tr=document.createElement('tr'); if(x.exists) tr.classList.add('highlight-rem'); else if(x.dup) tr.classList.add('highlight-chg'); else if(!x.okPrefix) tr.classList.add('muted'); tr.innerHTML=`<td><code>${x.from}</code></td><td><code>${x.to}</code></td><td class="dim">${x.exists?'target esiste':x.dup?'duplicato':!x.okPrefix?'fuori prefisso':''}</td>`; frag.appendChild(tr);}
+      tbody.appendChild(frag);
+    }
+
+    function genMv(){
+      const rows = selectedRows(); if(rows.length===0){ $('#out').value='Nessuna riga selezionata.'; return; }
+      const oldBase = normalizeBase($('#oldBase').value || guessOldBase(rows));
+      const newBase = normalizeBase($('#newBase').value || oldBase);
+      const lines = rows.map(r => { const from=(oldBase?oldBase+'.':'')+r.addr; const to=(newBase?newBase+'.':'')+r.addr; return `terraform state mv '${from}' '${to}'`; });
+      $('#oldBase').value = oldBase; $('#newBase').value = newBase; $('#out').value = lines.join('\n');
+    }
+    function genMoved(){
+      const rows = selectedRows(); if(rows.length===0){ $('#out').value='Nessuna riga selezionata.'; return; }
+      const oldBase = normalizeBase($('#oldBase').value || guessOldBase(rows));
+      const newBase = normalizeBase($('#newBase').value || oldBase);
+      const blocks = rows.map(r => { const from=(oldBase?oldBase+'.':'')+r.addr; const to=(newBase?newBase+'.':'')+r.addr; return `moved {\n  from = "${from}"\n  to   = "${to}"\n}`; });
+      $('#oldBase').value = oldBase; $('#newBase').value = newBase; $('#out').value = blocks.join('\n\n');
+    }
+
+    // --------- IMPORT: auto-find ID + generatori CLI/HCL ----------
+    function findFirstId(attrs, preferField){
+      // 1) Campo esplicito
+      if (preferField && attrs && typeof attrs === 'object' && attrs[preferField]) return String(attrs[preferField]);
+      // 2) Nomi comuni
+      for (const k of ['id','ocid','resource_id']) {
+        if (attrs && typeof attrs === 'object' && typeof attrs[k] === 'string' && attrs[k]) return attrs[k];
+      }
+      // 3) Ricerca profonda per valori che "sembrano" OCID
+      const re = /^ocid1\.[a-z0-9]+\./i;
+      let found = null;
+      (function walk(o){
+        if (found) return;
+        if (typeof o === 'string') { if (re.test(o)) { found = o; } return; }
+        if (!o || typeof o !== 'object') return;
+        for (const v of Object.values(o)) { walk(v); if (found) break; }
+      })(attrs);
+      return found;
+    }
+
+    function genImportCLI(){
+      const rows = selectedRows(); if (rows.length===0){ $('#out').value = 'Nessuna riga selezionata.'; return; }
+      const targetBase = normalizeBase($('#newBase').value || guessOldBase(rows)); // dove importare
+      const idField = ($('#idField').value||'').trim();
+      const lines = rows.map(r => {
+        const toAddr = (targetBase? targetBase + '.' : '') + r.addr;
+        const id = findFirstId(r.attributes, idField);
+        return id ? `terraform import '${toAddr}' '${id}'` : `# ⚠️ id non trovato per ${toAddr}`;
+      });
+      $('#newBase').value = targetBase;
+      $('#out').value = lines.join('\n');
+    }
+
+    function genImportBlocks(){
+      const rows = selectedRows(); if (rows.length===0){ $('#out').value = 'Nessuna riga selezionata.'; return; }
+      const targetBase = normalizeBase($('#newBase').value || guessOldBase(rows));
+      const idField = ($('#idField').value||'').trim();
+      const blocks = rows.map(r => {
+        // Nota: in HCL "to" è un address, quindi niente virgolette
+        const toAddr = (targetBase? targetBase + '.' : '') + r.addr;
+        const id = findFirstId(r.attributes, idField);
+        return id
+          ? `import {\n  to = ${toAddr}\n  id = ${JSON.stringify(id)}\n}`
+          : `# ⚠️ id non trovato per ${toAddr}`;
+      });
+      $('#newBase').value = targetBase;
+      $('#out').value = blocks.join('\n\n');
+    }
+    // ---------------------------------------------------------------
+
+    function exportCsv(){
+      const rows = FILTERED; const cols=['addr','type','name','key','provider']; const header=cols.join(','); const body=rows.map(r => cols.map(k => JSON.stringify(r[k]??'')).join(',')).join('\n'); const blob=new Blob([header+'\n'+body],{type:'text/csv'}); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download='tfstate_resources.csv'; a.click(); URL.revokeObjectURL(url);
+    }
+
+    async function copyOut(){ try{ await navigator.clipboard.writeText($('#out').value); }catch{} }
+    function dlOut(){ const txt=$('#out').value; const isShell = txt.trim().startsWith('terraform state mv') || txt.trim().startsWith('terraform import'); const name=isShell?'commands.sh':'moved-or-import.tf'; const mime=isShell?'text/x-shellscript':'application/hcl'; const blob=new Blob([txt],{type:mime}); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download=name; a.click(); URL.revokeObjectURL(url); }
+
+    // Wire UI
+    $('#file').addEventListener('change', async (e)=>{ const f=e.target.files?.[0]; if(!f) return; try{ const txt=await f.text(); loadState(JSON.parse(txt)); }catch(err){ alert('File JSON non valido: '+err.message); } });
+    $('#fileBase').addEventListener('change', async (e)=>{ const f=e.target.files?.[0]; if(!f) return; try{ const txt=await f.text(); loadBase(JSON.parse(txt)); }catch(err){ alert('Base JSON non valido: '+err.message); } });
+    $('#search').addEventListener('input', applyFilter);
+    $('#attrSearch').addEventListener('change', applyFilter);
+    $('#fMod').addEventListener('change', applyFilter);
+    $('#fType').addEventListener('change', applyFilter);
+    $('#fProv').addEventListener('change', applyFilter);
+    $('#fDiff').addEventListener('change', applyFilter);
+    $('#toggleAll').addEventListener('change', (e)=>{ if(e.target.checked){ FILTERED.forEach(r => SELECTED.add(r.id)); } else { FILTERED.forEach(r => SELECTED.delete(r.id)); } syncSelectionUI(); renderTable(FILTERED); renderPreview(); });
+    $('#selectFiltered').addEventListener('click', ()=>{ FILTERED.forEach(r => SELECTED.add(r.id)); syncSelectionUI(); renderTable(FILTERED); renderPreview(); });
+    $('#clearSel').addEventListener('click', ()=>{ SELECTED.clear(); syncSelectionUI(); renderTable(FILTERED); renderPreview(); });
+    $('#genMv').addEventListener('click', genMv);
+    $('#genMoved').addEventListener('click', genMoved);
+    $('#genImportCLI').addEventListener('click', genImportCLI);
+    $('#genImportBlocks').addEventListener('click', genImportBlocks);
+    $('#exportCsv').addEventListener('click', exportCsv);
+    '#copyOut' in window ? $('#copyOut').addEventListener('click', copyOut) : null;
+    $('#copyOut').addEventListener('click', copyOut);
+    $('#dlOut').addEventListener('click', dlOut);
+
+    // Demo data
+    const DEMO = {"version":4,"terraform_version":"1.8.5","resources":[{"module":"module.A.module.B.module.C","mode":"managed","type":"oci_core_instance","name":"vm","provider":"provider[\"registry.terraform.io/oracle/oci\"]","instances":[{"index_key":"db","attributes":{"display_name":"vm-db","private_ip":"10.0.1.10","id":"ocid1.instance.oc1..aaaa"}},{"index_key":"web","attributes":{"display_name":"vm-web","private_ip":"10.0.1.20","ocid":"ocid1.instance.oc1..bbbb"}}]},{"module":"module.A.module.B.module.C","mode":"managed","type":"oci_core_vnic_attachment","name":"vnic","provider":"provider[\"registry.terraform.io/oracle/oci\"]","instances":[{"index":0,"attributes":{"nic":"nic0","resource_id":"ocid1.vnicattachment.oc1..cccc"}},{"index":1,"attributes":{"nic":"nic1"}}]},{"module":"module.A.module.D","mode":"managed","type":"oci_dns_rrset","name":"a_records","provider":"provider[\"registry.terraform.io/oracle/oci\"]","instances":[{"index_key":"web","attributes":{"domain":"web.example.com","rdata":"203.0.113.10"}}]}]};
+    const DEMO_BASE = {"version":4,"terraform_version":"1.5.7","resources":[{"module":"module.A.module.B.module.C","mode":"managed","type":"oci_core_instance","name":"vm","provider":"provider[\"registry.terraform.io/oracle/oci\"]","instances":[{"index_key":"db","attributes":{"display_name":"vm-db","private_ip":"10.0.1.11"}}]},{"module":"module.A.module.B.module.C","mode":"managed","type":"oci_core_vnic_attachment","name":"vnic","provider":"provider[\"registry.terraform.io/oracle/oci\"]","instances":[{"index":0,"attributes":{"nic":"nic0"}}]}]};
+
+    $('#demo').addEventListener('click', ()=>{ loadState(DEMO); loadBase(DEMO_BASE); });
+
+    // Drag & drop
+    document.addEventListener('dragover', (e)=>{ e.preventDefault(); });
+    document.addEventListener('drop', async (e)=>{ if(!e.dataTransfer?.files?.length) return; e.preventDefault(); const f=e.dataTransfer.files[0]; try{ const txt=await f.text(); loadState(JSON.parse(txt)); }catch(err){ alert('File JSON non valido: '+err.message); } });
+
+    // Initial hint
+    $('#out').value = 'Tip: carica uno state (e opzionale la base per diff), filtra/cerca, seleziona righe o usa “Seleziona risultati”,\npoi imposta i prefissi e genera mv/moved/import.\n— Le righe Added/Removed/Changed sono evidenziate.';
+</script>
+</body>
+</html>

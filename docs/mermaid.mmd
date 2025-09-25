@@ -1,0 +1,56 @@
+flowchart TD
+  subgraph Input
+    S1[File .tfstate corrente]
+    S2[File .tfstate base opzionale]
+    Dn[Drag & Drop / File Picker]
+  end
+
+  Dn --> S1
+  Dn --> S2
+
+  S1 --> P[Parser tfstate to Rows]
+  S2 --> PB[Parser tfstate to Rows base]
+
+  P -->|Rows| IDX[Indexing & Normalization]
+  PB -->|Rows base| DIFF[Diff Engine]
+
+  IDX --> FILT[Filters & Search<br/>Mod/Type/Prov/Full-text]
+  DIFF --> FILT
+
+  FILT --> TBL[Tabella filtrata]
+  FILT --> TREE[Albero moduli/risorse]
+
+  TBL --> SEL[Selection Manager]
+  TREE --> SEL
+
+  subgraph Generator
+    PREV[Preview from to<br/>dup/exists/prefix check]
+    MV[terraform state mv CLI]
+    MVD[moved block HCL]
+    IMPCLI[terraform import CLI]
+    IMPBLK[import block HCL]
+  end
+
+  SEL --> PREV
+  PREV --> MV
+  PREV --> MVD
+  SEL --> IMPCLI
+  SEL --> IMPBLK
+
+  subgraph "Import ID Resolver"
+    CFG[Campo ID<br/>es: id/ocid]
+    AUT[Autodetect: id to ocid to resource_id<br/>to deep scan ocid1.*]
+  end
+
+  CFG --> IMPCLI
+  CFG --> IMPBLK
+  AUT --> IMPCLI
+  AUT --> IMPBLK
+
+  MV --> OUT[Output<br/>Copia/Download]
+  MVD --> OUT
+  IMPCLI --> OUT
+  IMPBLK --> OUT
+
+  TBL -.-> CSV[CSV export]
+  CSV --> OUT
